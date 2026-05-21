@@ -1,0 +1,290 @@
+{
+  "name": "Social Media Strategist – AI Powered Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "e889842f-4727-492d-804b-504fd1e7c80f",
+      "name": "⏰ Daily Trigger 9AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [-6400, 2016]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topics",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "pending"
+            }
+          ]
+        },
+        "combineFilters": "AND",
+        "options": {}
+      },
+      "id": "3f5c80c2-b75e-4656-8951-7deecdec5d08",
+      "name": "🗂️ Fetch Pending Topic",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [-6176, 2016]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-topic-check",
+              "leftValue": "={{ $json.topic }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b0931a99-7343-44c2-869f-ed06d85c1184",
+      "name": "🔍 Topic Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-5952, 2016]
+    },
+    {
+      "parameters": {
+        "url": "=https://serpapi.com/search.json?q={{ encodeURIComponent($json.topic + ' social media trends 2025') }}&num=3&api_key=YOUR_SERPAPI_KEY",
+        "options": {}
+      },
+      "id": "3450dab4-1655-477e-8966-c16e9954a0a4",
+      "name": "🔎 Search Trends (WebSearch)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-5728, 1920]
+    },
+    {
+      "parameters": {
+        "jsCode": "const searchData = $input.first().json;\nconst topicData = $('🗂️ Fetch Pending Topic').first().json;\n\nlet trendContext = '';\ntry {\n  const results = searchData.organic_results || [];\n  const top3 = results.slice(0, 3);\n  if (top3.length > 0) {\n    trendContext = top3.map((r, i) =>\n      `${i+1}. ${r.title}: ${r.snippet}`\n    ).join('\\n');\n  } else {\n    trendContext = 'Use general knowledge about ' + topicData.topic;\n  }\n} catch(e) {\n  trendContext = 'Use general knowledge about ' + topicData.topic;\n}\n\nreturn [{\n  json: {\n    topic: topicData.topic,\n    brand_voice: topicData.brand_voice,\n    platform_focus: topicData.platform_focus,\n    trend_context: trendContext,\n    _rowNumber: topicData._rowNumber || 2\n  }\n}];"
+      },
+      "id": "09f58078-1e48-43e3-8fe8-376223b5d292",
+      "name": "⚙️ Extract Trend Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-5504, 1920]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=YOUR_GEMINI_API_KEY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const d = $json; return JSON.stringify({ contents: [{ parts: [{ text: 'You are an expert Social Media Strategist.\\n\\nTOPIC: ' + d.topic + '\\nBRAND VOICE: ' + d.brand_voice + '\\nPLATFORM FOCUS: ' + d.platform_focus + '\\n\\nTREND CONTEXT:\\n' + d.trend_context + '\\n\\nWrite posts for LinkedIn (150-300 words, professional, hook first line, 3-5 hashtags, end with CTA) and Twitter (max 260 chars, punchy, max 2 hashtags).\\n\\nReturn ONLY valid JSON, no markdown:\\n{\"linkedin_post\": \"...\", \"twitter_post\": \"...\", \"content_theme\": \"...\", \"engagement_hook\": \"...\", \"best_post_time\": \"...\", \"followup_content\": \"...\"}' }] }], generationConfig: { temperature: 0.75, maxOutputTokens: 3000 } }); })() }}",
+        "options": {}
+      },
+      "id": "b81cdba7-ddba-4c6e-97f3-2d6fe7602adc",
+      "name": "🤖 Gemini – Generate Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-5280, 1920]
+    },
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.first().json;\nlet rawText = '';\ntry {\n  rawText = geminiResponse.candidates[0].content.parts[0].text;\n} catch(e) {\n  throw new Error('Gemini error: ' + JSON.stringify(geminiResponse));\n}\n\nconst cleaned = rawText.replace(/```json/gi,'').replace(/```/g,'').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch(e) {\n  const linkedin = cleaned.match(/\"linkedin_post\"\\s*:\\s*\"([\\s\\S]*?)(?:\"\\s*,\\s*\"twitter_post\"|$)/);\n  const twitter  = cleaned.match(/\"twitter_post\"\\s*:\\s*\"([\\s\\S]*?)(?:\"\\s*,\\s*\"|$)/);\n  const theme    = cleaned.match(/\"content_theme\"\\s*:\\s*\"([\\s\\S]*?)\"/);\n  const hook     = cleaned.match(/\"engagement_hook\"\\s*:\\s*\"([\\s\\S]*?)\"/);\n  const postTime = cleaned.match(/\"best_post_time\"\\s*:\\s*\"([\\s\\S]*?)\"/);\n  const followup = cleaned.match(/\"followup_content\"\\s*:\\s*\"([\\s\\S]*?)\"/);\n  parsed = {\n    linkedin_post:   linkedin ? linkedin[1] : rawText.substring(0,1000),\n    twitter_post:    twitter  ? twitter[1]  : '',\n    content_theme:   theme    ? theme[1]    : '',\n    engagement_hook: hook     ? hook[1]     : '',\n    best_post_time:  postTime ? postTime[1] : '9AM',\n    followup_content:followup ? followup[1] : ''\n  };\n}\n\nconst topicData = $('🗂️ Fetch Pending Topic').first().json;\nconst trendData = $('⚙️ Extract Trend Data').first().json;\nconst rowNum = topicData._rowNumber || topicData.rowNumber || topicData.row_number || 2;\n\nreturn [{\n  json: {\n    linkedin_post:    parsed.linkedin_post    || '',\n    twitter_post:     parsed.twitter_post     || '',\n    content_theme:    parsed.content_theme    || '',\n    engagement_hook:  parsed.engagement_hook  || '',\n    best_post_time:   parsed.best_post_time   || '',\n    followup_content: parsed.followup_content || '',\n    trend_context:    trendData.trend_context || '',\n    original_topic:   topicData.topic,\n    brand_voice:      topicData.brand_voice,\n    row_number:       rowNum,\n    generated_at:     new Date().toISOString()\n  }\n}];"
+      },
+      "id": "b71a92da-22c3-4eac-b192-0e1a1626ceed",
+      "name": "⚙️ Parse Gemini Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-5056, 1920]
+    },
+    {
+      "parameters": {
+        "person": "urn:li:member:YOUR_LINKEDIN_MEMBER_ID",
+        "text": "={{ $json.linkedin_post }}",
+        "additionalFields": {
+          "visibility": "PUBLIC"
+        }
+      },
+      "id": "8f711e0c-5235-4e12-a058-7f813ab9ab18",
+      "name": "📤 Post to LinkedIn",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [-4832, 1920]
+    },
+    {
+      "parameters": {
+        "jsCode": "const topicData = $('🗂️ Fetch Pending Topic').first().json;\nconst parsedData = $('⚙️ Parse Gemini Response').first().json;\n\nreturn [{\n  json: {\n    ...parsedData,\n    row_to_update: topicData._rowNumber || 2,\n    new_status: 'posted'\n  }\n}];"
+      },
+      "id": "d4b36cde-af05-4740-b723-8f6f0b749aed",
+      "name": "⚙️ Prepare Status Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-4608, 1920]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topics",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $json.row_to_update }}",
+            "status": "posted",
+            "posted_at": "={{ $json.generated_at }}"
+          },
+          "matchingColumns": ["row_number"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "42388edd-bae5-4f20-9a53-aef5de07fdc8",
+      "name": "✅ Mark Topic as Posted",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [-4384, 1920]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topics",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "87887dc4-5dc8-4488-85d5-bdbf018cd1e8",
+      "name": "📊 Log Results to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [-4160, 1920]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=✅ *Campaign Published!*\n\n📌 *Topic:* {{ $json.original_topic }}\n\n🔎 *Trends Used:*\n{{ $json.trend_context.substring(0,200) }}...\n\n💼 *LinkedIn Preview:*\n{{ $json.linkedin_post.slice(0,280) }}...\n\n🐦 *Twitter (ready to post):*\n{{ $json.twitter_post }}\n\n🎯 *Engagement Hook:*\n{{ $json.engagement_hook }}\n\n📅 *Best Post Time:* {{ $json.best_post_time }}\n\n💡 *Follow-up Idea:*\n{{ $json.followup_content }}\n\n🕐 _Generated at {{ $json.generated_at }}_",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "6f5189f7-2738-4a07-b08d-9e132d194ba3",
+      "name": "🔔 Campaign Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [-3936, 1920]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "⚠️ *No pending topics found!*\n\nAll topics have been posted. Add new rows to Google Sheet with status = pending to continue.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "a225b0b6-8cd7-4842-86a9-92b9d7dd0c10",
+      "name": "⚠️ Notify – No Topics",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [-5728, 2112]
+    }
+  ],
+  "connections": {
+    "⏰ Daily Trigger 9AM": {
+      "main": [[{ "node": "🗂️ Fetch Pending Topic", "type": "main", "index": 0 }]]
+    },
+    "🗂️ Fetch Pending Topic": {
+      "main": [[{ "node": "🔍 Topic Found?", "type": "main", "index": 0 }]]
+    },
+    "🔍 Topic Found?": {
+      "main": [
+        [{ "node": "🔎 Search Trends (WebSearch)", "type": "main", "index": 0 }],
+        [{ "node": "⚠️ Notify – No Topics", "type": "main", "index": 0 }]
+      ]
+    },
+    "🔎 Search Trends (WebSearch)": {
+      "main": [[{ "node": "⚙️ Extract Trend Data", "type": "main", "index": 0 }]]
+    },
+    "⚙️ Extract Trend Data": {
+      "main": [[{ "node": "🤖 Gemini – Generate Posts", "type": "main", "index": 0 }]]
+    },
+    "🤖 Gemini – Generate Posts": {
+      "main": [[{ "node": "⚙️ Parse Gemini Response", "type": "main", "index": 0 }]]
+    },
+    "⚙️ Parse Gemini Response": {
+      "main": [[{ "node": "📤 Post to LinkedIn", "type": "main", "index": 0 }]]
+    },
+    "📤 Post to LinkedIn": {
+      "main": [[{ "node": "⚙️ Prepare Status Update", "type": "main", "index": 0 }]]
+    },
+    "⚙️ Prepare Status Update": {
+      "main": [[{ "node": "✅ Mark Topic as Posted", "type": "main", "index": 0 }]]
+    },
+    "✅ Mark Topic as Posted": {
+      "main": [[{ "node": "📊 Log Results to Sheet", "type": "main", "index": 0 }]]
+    },
+    "📊 Log Results to Sheet": {
+      "main": [[{ "node": "🔔 Campaign Report", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
